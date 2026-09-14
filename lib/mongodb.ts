@@ -1,5 +1,22 @@
+import dns from "node:dns";
 import { MongoClient, type Db, type Collection } from "mongodb";
 import type { DeviceDoc, CommandDoc, ScheduleDoc } from "@/types/device";
+
+// ============================================================
+// DNS WORKAROUND (Windows dev environment)
+// When the Wi-Fi adapter only has an IPv6 DNS server configured, Node's
+// c-ares resolver ends up with 127.0.0.1 as its only server, so every
+// dns.resolve* call — including the SRV lookup that mongodb+srv:// needs —
+// fails with ECONNREFUSED. Patch the resolver with public DNS servers.
+// dns.lookup() (getaddrinfo) is unaffected, so this only touches resolve*.
+// ============================================================
+if (
+  dns
+    .getServers()
+    .every((server) => server.startsWith("127.") || server === "::1" || server === "[::1]")
+) {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+}
 
 // ============================================================
 // CONFIG
