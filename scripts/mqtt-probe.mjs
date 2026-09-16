@@ -10,7 +10,9 @@
  */
 
 import dotenv from "dotenv";
+// Ưu tiên .env.local, .env làm fallback (dotenv không ghi đè biến có sẵn)
 dotenv.config({ path: ".env.local" });
+dotenv.config({ path: ".env" });
 import mqtt from "mqtt";
 
 const BROKER = process.env.MQTT_BROKER_URL || "mqtt://broker.emqx.io:1883";

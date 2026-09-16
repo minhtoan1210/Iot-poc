@@ -14,6 +14,12 @@ import { ScheduleList } from "@/components/schedule-list";
 
 const DEVICE_ID = "esp32-001";
 const COMMAND_TIMEOUT_MS = 10000;
+// Ngưỡng coi thiết bị là "mới gör" — phải khớp DEVICE_OFFLINE_MS trong lib/db-service.ts
+const DEVICE_OFFLINE_MS = 45_000;
+// Thời gian ân hạn khi mới vào trang: lastSeen cũ/Never thì chờ thêm ~1 nhịp
+// heartbeat (15s) + dự phòng xem thiết bị có báo tín hiệu không, trước khi
+// kết luận Offline — tránh chớp đỏ "Offline" rồi xanh ngay sau đó.
+const CHECK_GRACE_MS = 20_000;
 
 export default function DashboardClient() {
   const [device, setDevice] = useState<Device | null>(null);
@@ -21,8 +27,24 @@ export default function DashboardClient() {
   const [commandStatus, setCommandStatus] = useState<CommandStatus | null>(null);
   const [commandState, setCommandState] = useState<DeviceState | null>(null);
   const [lastResponse, setLastResponse] = useState("");
+  const [serverOk, setServerOk] = useState(true);
   const [sending, setSending] = useState(false);
+  // true từ lúc mở trang đến khi có tín hiệu xác thực trạng thái đầu tiên
+  const [statusChecking, setStatusChecking] = useState(true);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const checkGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const checkingDoneRef = useRef(false);
+
+  // Kết thúc phiên "Checking..." ban đầu: đã có tín hiệu xác thực (heartbeat
+  // qua SSE) hoặc hết thời gian ân hạn → hiển thị trạng thái thật.
+  const finishChecking = useCallback(() => {
+    checkingDoneRef.current = true;
+    if (checkGraceRef.current) {
+      clearTimeout(checkGraceRef.current);
+      checkGraceRef.current = null;
+    }
+    setStatusChecking(false);
+  }, []);
 
   // Fetch device + commands from MongoDB (initial load & polling fallback).
   // Only the device state is restored from DB — old command badges are NOT
@@ -33,11 +55,29 @@ export default function DashboardClient() {
       if (res.ok) {
         const data = await res.json();
         setDevice(data.device);
+        setServerOk(true);
+
+        // lastSeen còn mới → tin trạng thái DB luôn. Ngược lại (OFFLINE cũ
+        // hoặc Never) → vào thời gian ân hạn chờ heartbeat đầu tiên qua SSE,
+        // thay vì kết luận đỏ ngay khi dữ liệu có thể đã lỗi thời.
+        if (!checkingDoneRef.current) {
+          const d = data.device;
+          const fresh =
+            !!d?.lastSeen &&
+            Date.now() - new Date(d.lastSeen).getTime() < DEVICE_OFFLINE_MS;
+          if (fresh) {
+            finishChecking();
+          } else if (checkGraceRef.current === null) {
+            checkGraceRef.current = setTimeout(finishChecking, CHECK_GRACE_MS);
+          }
+        }
       }
-    } catch (err) {
-      console.error("Failed to fetch device status:", err);
+    } catch {
+      // Im lặng — server tạm chưa chạy thì hiện banner, đừng spam console
+      setServerOk(false);
+      finishChecking(); // server không hỏi được → thôi check, hiện banner cảnh báo
     }
-  }, []);
+  }, [finishChecking]);
 
   // Fetch schedules
   const fetchSchedules = useCallback(async () => {
@@ -47,25 +87,30 @@ export default function DashboardClient() {
         const data = await res.json();
         setSchedules(data.schedules);
       }
-    } catch (err) {
-      console.error("Failed to fetch schedules:", err);
+    } catch {
+      setServerOk(false);
     }
   }, []);
 
-  // Polling fallback - fetch status mỗi 3 giây để đảm bảo UI luôn đồng bộ
+  // KHÔNG poll định kỳ nữa: realtime do SSE đảm nhiệm. Chỉ fetch 1 lần khi
+  // load trang, khi người dùng bấm lệnh, và khi quay lại tab.
   const pollNow = useEffectEvent(() => {
     fetchDeviceStatus();
     fetchSchedules();
   });
 
   useEffect(() => {
-    // Defer initial fetch to a timer so we don't setState synchronously in the effect
     const initial = setTimeout(pollNow, 0);
-    const pollInterval = setInterval(pollNow, 3000);
+
+    const onFocus = () => pollNow();
+    window.addEventListener("focus", onFocus);
 
     return () => {
       clearTimeout(initial);
-      clearInterval(pollInterval);
+      window.removeEventListener("focus", onFocus);
+      if (checkGraceRef.current) {
+        clearTimeout(checkGraceRef.current);
+      }
     };
   }, []);
 
@@ -81,6 +126,8 @@ export default function DashboardClient() {
           const updatedDevice = data as { type: string; data: Device };
           if (updatedDevice.data.deviceId === DEVICE_ID) {
             setDevice(updatedDevice.data);
+            // Có tín hiệu sống từ thiết bị → kết thúc phiên check ban đầu
+            finishChecking();
           }
         } else if (data.type === "command_update") {
           const updatedCommand = data as { type: string; data: Command };
@@ -92,6 +139,14 @@ export default function DashboardClient() {
                 ? `Error: ${updatedCommand.data.error}`
                 : `Last update: ${new Date(updatedCommand.data.updatedAt).toLocaleTimeString()}`
             );
+
+            // Trạng thái trung gian ACKNOWLEDGED: thiết bị đã nhận lệnh,
+            // tiếp tục chờ SUCCESS/FAILED — chưa clear timeout.
+            if (updatedCommand.data.status === "ACKNOWLEDGED") {
+              setLastResponse(
+                `Thiết bị xác nhận đã nhận lệnh lúc ${new Date(updatedCommand.data.updatedAt).toLocaleTimeString()}`
+              );
+            }
 
             // Clear sending state and timeout when we get a definitive result
             if (
@@ -112,17 +167,18 @@ export default function DashboardClient() {
       }
     };
 
-    eventSource.onerror = () => {
-      console.log("SSE connection error, will reconnect...");
-    };
+    eventSource.onopen = () => setServerOk(true);
+    eventSource.onerror = () => setServerOk(false);
 
     return () => {
       eventSource.close();
     };
-  }, []);
+  }, [finishChecking]);
 
   // Send command
   const handleCommand = async (command: DeviceState) => {
+    // "Bấm thì mới check": làm mới trạng thái device ngay lúc bấm lệnh
+    fetchDeviceStatus();
     setSending(true);
     setCommandStatus("PENDING");
     setCommandState(null);
@@ -208,8 +264,27 @@ export default function DashboardClient() {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
-          <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
-          <p className="text-sm text-zinc-500">Loading device...</p>
+          {!serverOk ? (
+            <>
+              <p className="mb-4 text-sm text-orange-600 dark:text-orange-400">
+                ⚠️ Không kết nối được server — backend/broker chưa chạy?
+              </p>
+              <button
+                onClick={() => {
+                  fetchDeviceStatus();
+                  fetchSchedules();
+                }}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Thử lại
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+              <p className="text-sm text-zinc-500">Loading device...</p>
+            </>
+          )}
         </div>
       </div>
     );
@@ -217,8 +292,14 @@ export default function DashboardClient() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-6">
+      {!serverOk && (
+        <div className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800 dark:border-orange-800 dark:bg-orange-950/30 dark:text-orange-300">
+          ⚠️ Mất kết nối server — dữ liệu có thể cũ. Bấm lệnh hoặc chuyển tab để thử lại.
+        </div>
+      )}
       <DeviceCard
         device={device}
+        statusChecking={statusChecking}
         commandStatus={commandStatus}
         commandState={commandState}
         lastResponse={lastResponse}

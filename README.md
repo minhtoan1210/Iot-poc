@@ -59,12 +59,11 @@ Trình tự khi người dùng bấm ON/OFF trên web:
 
 ### 2.5 Cách Device ACK xác nhận đã nhận command
 
-Thiết kế hiện tại: **không có bước ACK riêng** — device trả kết quả thực thi trực tiếp qua topic `status`, backend chuyển lệnh từ `PENDING` → `SUCCESS`/`FAILED`. Nhược điểm: backend không phân biệt được "đã nhận chưa chạy" với "chưa nhận".
+**Đã triển khai (ACK 2 bước):**
+1. Device publish `status` với `status: "ACK"` **ngay khi nhận lệnh** → backend chuyển lệnh `PENDING` → `ACKNOWLEDGED` (UI: "Thiết bị đã nhận lệnh, đang thực thi...").
+2. Khi chạy xong, device publish `status: "SUCCESS"|"FAILED"` → backend cập nhật như bình thường.
 
-Phương án nâng cấp (đề xuất với Team Nhúng, chưa triển khai):
-- Bước 1: device publish `status` với `status: "ACK"` ngay khi nhận lệnh.
-- Bước 2: khi chạy xong, publish lại `status: "SUCCESS"|"FAILED"`.
-- Backend thêm giá trị trạng thái trung gian `ACKNOWLEDGED`.
+Lợi ích: backend phân biệt được "device đã nhận chưa chạy" với "chưa nhận" (mất message trên broker public) — chẩn đoán lỗi chính xác hơn. Lệnh `ACKNOWLEDGED` quá 10s không có kết quả vẫn bị sweeper đánh `TIMEOUT`. Mock device (`scripts/mock-device.ts`) đã gửi ACK mẫu để đối chiếu; firmware thật của Team Nhúng cần bổ sung bước publish ACK tương tự.
 
 ### 2.6 Cách Device báo kết quả thành công/thất bại
 

@@ -1,0 +1,80 @@
+[Broker] ✅ Local MQTT broker chạy tại mqtt://localhost:1883
+[Broker]    Đổi .env: MQTT_BROKER_URL=mqtt://localhost:1883
+[Broker] 🔌 Client kết nối: mqtt-explorer-6b2bc387
+[Broker] 📡 mqtt-explorer-6b2bc387 subscribe: #
+[Broker] 📡 mqtt-explorer-6b2bc387 subscribe: $SYS/#
+[Broker] 🔌 Client kết nối: mock-esp32-001-mu3s3pmv
+[Broker] 📡 mock-esp32-001-mu3s3pmv subscribe: devices/esp32-001/command
+[Broker] 📡 mock-esp32-001-mu3s3pmv subscribe: devices/esp32-001/schedule
+[Broker] 📨 mock-esp32-001-mu3s3pmv → devices/esp32-001/heartbeat :: {"device_id":"esp32-001","timestamp":"2026-09-16T07:28:01.801Z"}
+[Broker] 📨 mock-esp32-001-mu3s3pmv → devices/esp32-001/heartbeat :: {"device_id":"esp32-001","timestamp":"2026-09-16T07:28:16.797Z"}
+[Broker] 🔌 Client kết nối: nextjs-backend-55c88b
+[Broker] 📡 nextjs-backend-55c88b subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 🔌 Client kết nối: nextjs-backend-81fd82
+[Broker] 📡 nextjs-backend-81fd82 subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-81fd82
+[Broker] 📨 mock-esp32-001-mu3s3pmv → devices/esp32-001/heartbeat :: {"device_id":"esp32-001","timestamp":"2026-09-16T07:28:31.804Z"}
+[Broker] 🔌 Client kết nối: nextjs-backend-a3021f
+[Broker] 📡 nextjs-backend-a3021f subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 🔌 Client kết nối: nextjs-backend-a96d7b
+[Broker] 📡 nextjs-backend-a96d7b subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 📨 nextjs-backend-55c88b → devices/esp32-001/command :: {"command_id":"cmd-70bd2bb4","device_id":"esp32-001","command":"OFF","timestamp":"2026-09-16T07:28:33.748Z"}
+[Broker] 📨 mock-esp32-001-mu3s3pmv → devices/esp32-001/status :: {"device_id":"esp32-001","command_id":"cmd-70bd2bb4","status":"ACK","timestamp":"2026-09-16T07:28:33.752Z","error":null}
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-a3021f
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-a96d7b
+[Broker] 📨 mock-esp32-001-mu3s3pmv → devices/esp32-001/status :: {"device_id":"esp32-001","command_id":"cmd-70bd2bb4","status":"SUCCESS","state":"OFF","timestamp":"2026-09-16T07:28:34.766Z","error":null}
+[Broker] 👋 Client ngắt kết nối: mock-esp32-001-mu3s3pmv
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-55c88b
+[Broker] 🔌 Client kết nối: nextjs-backend-8a4f69
+[Broker] 📡 nextjs-backend-8a4f69 subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 🔌 Client kết nối: nextjs-backend-d1cccb
+[Broker] 📡 nextjs-backend-d1cccb subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-d1cccb
+[Broker] 🔌 Client kết nối: nextjs-backend-7985ca
+[Broker] 📡 nextjs-backend-7985ca subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-7985ca
+[Broker] 🔌 Client kết nối: nextjs-backend-0fb8d3
+[Broker] 📡 nextjs-backend-0fb8d3 subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-0fb8d3
+[Broker] 🔌 Client kết nối: nextjs-backend-21877d
+[Broker] 📡 nextjs-backend-21877d subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-21877d
+[Broker] 🔌 Client kết nối: nextjs-backend-933e81
+[Broker] 📡 nextjs-backend-933e81 subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-933e81
+[Broker] 🔌 Client kết nối: nextjs-backend-2c8c42
+[Broker] 📡 nextjs-backend-2c8c42 subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-2c8c42
+[Broker] 🔌 Client kết nối: nextjs-backend-498677
+[Broker] 📡 nextjs-backend-498677 subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-498677
+[Broker] 🔌 Client kết nối: nextjs-backend-f0e25d
+[Broker] 📡 nextjs-backend-f0e25d subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-f0e25d
+[Broker] 🔌 Client kết nối: nextjs-backend-f7c88d
+[Broker] 📡 nextjs-backend-f7c88d subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-f7c88d
+[Broker] 🔌 Client kết nối: nextjs-backend-2d1884
+[Broker] 📡 nextjs-backend-2d1884 subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-2d1884
+[Broker] 🔌 Client kết nối: nextjs-backend-ae5145
+[Broker] 📡 nextjs-backend-ae5145 subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-ae5145
+[Broker] 🔌 Client kết nối: nextjs-backend-be3f8f
+[Broker] 📡 nextjs-backend-be3f8f subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-be3f8f
+[Broker] 🔌 Client kết nối: nextjs-backend-4a0e15
+[Broker] 📡 nextjs-backend-4a0e15 subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-4a0e15
+[Broker] 🔌 Client kết nối: nextjs-backend-9efd71
+[Broker] 📡 nextjs-backend-9efd71 subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-9efd71
+[Broker] 🔌 Client kết nối: nextjs-backend-378c7f
+[Broker] 📡 nextjs-backend-378c7f subscribe: devices/+/heartbeat, devices/+/status
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-378c7f
+[Broker] 👋 Client ngắt kết nối: mqtt-explorer-6b2bc387
+[Broker] 🔌 Client kết nối: mqtt-explorer-6b2bc387
+[Broker] 📡 mqtt-explorer-6b2bc387 subscribe: #
+[Broker] 📡 mqtt-explorer-6b2bc387 subscribe: $SYS/#
+[Broker] 👋 Client ngắt kết nối: nextjs-backend-8a4f69
+[Broker] 👋 Client ngắt kết nối: mqtt-explorer-6b2bc387

@@ -145,7 +145,7 @@ data: {"type":"schedule_update","data":{"scheduleId":"schedule-x1y2z3","deviceId
 | `type` | Khi nào bắn | UI làm gì |
 |---|---|---|
 | `device_update` | heartbeat (→ ONLINE), sweeper (→ OFFLINE), device report state | cập nhật thẻ thiết bị + bóng đèn |
-| `command_update` | tạo lệnh (PENDING), device trả kết quả, sweeper (TIMEOUT) | cập nhật badge trạng thái lệnh |
+| `command_update` | tạo lệnh (PENDING), device ACK (ACKNOWLEDGED), trả kết quả, sweeper (TIMEOUT) | cập nhật badge trạng thái lệnh |
 | `schedule_update` | tạo/xóa lịch | cập nhật danh sách lịch |
 
 ---
@@ -174,10 +174,24 @@ Broker: `mqtt://broker.emqx.io:1883` · Format: JSON UTF-8, timestamp ISO 8601 U
 | `command` | string | `"ON"` hoặc `"OFF"` |
 | `timestamp` | string | ISO 8601 UTC |
 
-### 2.2 📤 Device GỬI — Status (kết quả thực thi)
+### 2.2 📤 Device GỬI — Status (ACK + kết quả thực thi)
 
 **Topic:** `devices/{device_id}/status` · **QoS 1**
 
+Gửi **2 lần** cho mỗi lệnh:
+
+**(1) ACK — ngay khi nhận được lệnh (chưa chạy):**
+```json
+{
+  "device_id": "esp32-001",
+  "command_id": "cmd-a1b2c3d4",
+  "status": "ACK",
+  "timestamp": "2026-09-14T10:30:00.200Z",
+  "error": null
+}
+```
+
+**(2) Kết quả — khi chạy xong:**
 ```json
 {
   "device_id": "esp32-001",
@@ -193,12 +207,18 @@ Broker: `mqtt://broker.emqx.io:1883` · Format: JSON UTF-8, timestamp ISO 8601 U
 |---|---|---|---|
 | `device_id` | string | | ID thiết bị |
 | `command_id` | string | | Trùng với lệnh đã nhận |
-| `status` | string | `"SUCCESS"` / `"FAILED"` | Kết quả |
-| `state` | string | `"ON"` / `"OFF"` | Trạng thái LED sau khi chạy |
+| `status` | string | `"ACK"` / `"SUCCESS"` / `"FAILED"` | ACK = đã nhận lệnh; SUCCESS/FAILED = kết quả |
+| `state` | string | `"ON"` / `"OFF"` | Trạng thái LED sau khi chạy — **bắt buộc với SUCCESS/FAILED**, ACK bỏ trống được |
 | `timestamp` | string | | ISO 8601 UTC |
 | `error` | string/null | `"GPIO_ERROR"`… | Mã lỗi; `null` nếu thành công |
 
-⚠️ Backend **bỏ qua** payload thiếu `command_id` hoặc `state` (chống rác từ thiết bị lạ trên broker công khai).
+⚠️ Backend **bỏ qua** payload thiếu `command_id` hoặc (thiếu `state` và không phải `ACK`) (chống rác từ thiết bị lạ trên broker công khai).
+
+Vòng đời trạng thái lệnh tương ứng:
+```
+PENDING ──(ACK)──► ACKNOWLEDGED ──(SUCCESS/FAILED)──► SUCCESS / FAILED
+   └───────────────── không phản hồi trong 10s ──────────────► TIMEOUT
+```
 
 ### 2.3 📤 Device GỬI — Heartbeat
 

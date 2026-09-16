@@ -14,7 +14,9 @@
  */
 
 import dotenv from "dotenv";
+// Ưu tiên .env.local, .env làm fallback (dotenv không ghi đè biến có sẵn)
 dotenv.config({ path: ".env.local" });
+dotenv.config({ path: ".env" });
 import { MongoClient } from "mongodb";
 
 // Parse CLI args: --device X --command Y (repeatable)

@@ -5,7 +5,13 @@ export type DeviceOnlineStatus = "ONLINE" | "OFFLINE";
 export type DeviceState = "ON" | "OFF";
 
 // Command
-export type CommandStatus = "PENDING" | "SUCCESS" | "FAILED" | "TIMEOUT";
+// ACKNOWLEDGED: device đã nhận lệnh (ACK) nhưng chưa báo kết quả thực thi
+export type CommandStatus =
+  | "PENDING"
+  | "ACKNOWLEDGED"
+  | "SUCCESS"
+  | "FAILED"
+  | "TIMEOUT";
 
 export interface Device {
   deviceId: string;
@@ -82,10 +88,12 @@ export interface MQTTCommandPayload {
 export interface MQTTStatusPayload {
   device_id: string;
   command_id: string;
-  status: "SUCCESS" | "FAILED";
-  state: DeviceState;
+  /** ACK = đã nhận lệnh (chưa chạy); SUCCESS/FAILED = kết quả thực thi */
+  status: "ACK" | "SUCCESS" | "FAILED";
+  /** Bắt buộc với SUCCESS/FAILED; ACK có thể bỏ trống */
+  state?: DeviceState;
   timestamp: string;
-  error: string | null;
+  error?: string | null;
 }
 
 export interface MQTTHeartbeatPayload {

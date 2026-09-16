@@ -316,12 +316,15 @@ export async function sweepStaleData(): Promise<{
 }> {
   const now = Date.now();
 
-  // 1) Expire stale PENDING commands
+  // 1) Expire stale PENDING/ACKNOWLEDGED commands
+  //    - PENDING quá hạn: device không hề nhận lệnh (mất mạng, mất message)
+  //    - ACKNOWLEDGED quá hạn: device nhận rồi (ACK) nhưng không bao giờ
+  //      báo kết quả — vẫn phải TIMEOUT để UI không treo "đang thực thi"
   const staleCommands = await (
     await commandsCollection()
   )
     .find({
-      status: "PENDING",
+      status: { $in: ["PENDING", "ACKNOWLEDGED"] },
       createdAt: { $lt: new Date(now - COMMAND_TIMEOUT_MS) },
     })
     .toArray();
@@ -329,7 +332,8 @@ export async function sweepStaleData(): Promise<{
   const timedOutCommands: Command[] = [];
   for (const doc of staleCommands) {
     const updated = await (await commandsCollection()).findOneAndUpdate(
-      { commandId: doc.commandId, status: "PENDING" }, // re-check to avoid race
+      // re-check $in to avoid racing with a late SUCCESS/FAILED write
+      { commandId: doc.commandId, status: { $in: ["PENDING", "ACKNOWLEDGED"] } },
       { $set: { status: "TIMEOUT", updatedAt: new Date() } },
       { returnDocument: "after" }
     );

@@ -21,7 +21,15 @@ export function CommandStatusBadge({
           border: "border-amber-200 dark:border-amber-800",
           text: "text-amber-800 dark:text-amber-300",
           icon: "⏳",
-          label: "Đang xử lý...",
+          label: "Đang gửi lệnh tới thiết bị...",
+        };
+      case "ACKNOWLEDGED":
+        return {
+          bg: "bg-blue-50 dark:bg-blue-950/30",
+          border: "border-blue-200 dark:border-blue-800",
+          text: "text-blue-800 dark:text-blue-300",
+          icon: "📨",
+          label: "Thiết bị đã nhận lệnh, đang thực thi...",
         };
       case "SUCCESS":
         return {

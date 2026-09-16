@@ -1,12 +1,19 @@
 "use client";
 
-import type { Device, CommandStatus, DeviceState } from "@/types/device";
+import type {
+  Device,
+  CommandStatus,
+  DeviceState,
+  DeviceOnlineStatus,
+} from "@/types/device";
 import { DeviceControls } from "./device-controls";
 import { CommandStatusBadge } from "./command-status";
 import { LightBulb } from "./light-bulb";
 
 interface DeviceCardProps {
   device: Device;
+  /** Đang trong quá trình check lần đầu → chip hiện "Checking..." thay vì đỏ */
+  statusChecking?: boolean;
   commandStatus: CommandStatus | null;
   commandState: DeviceState | null;
   lastResponse: string;
@@ -16,6 +23,7 @@ interface DeviceCardProps {
 
 export function DeviceCard({
   device,
+  statusChecking,
   commandStatus,
   commandState,
   lastResponse,
@@ -34,7 +42,7 @@ export function DeviceCard({
             Device ID: {device.deviceId}
           </p>
         </div>
-        <StatusIndicator status={device.status} />
+        <StatusIndicator status={device.status} checking={statusChecking} />
       </div>
 
       {/* Light Bulb Indicator */}
@@ -82,7 +90,25 @@ export function DeviceCard({
   );
 }
 
-function StatusIndicator({ status }: { status: "ONLINE" | "OFFLINE" }) {
+function StatusIndicator({
+  status,
+  checking = false,
+}: {
+  status: DeviceOnlineStatus;
+  checking?: boolean;
+}) {
+  // Đang check lần đầu: chưa kết luận được → vàng nhấp nháy, đừng đỏ vội
+  if (checking) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-amber-500" />
+        <span className="text-sm font-medium text-amber-700 dark:text-amber-400">
+          Checking...
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center gap-2">
       <span

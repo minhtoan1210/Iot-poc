@@ -19,7 +19,10 @@ export function getMQTTClient(): mqtt.MqttClient {
     client = globalForMqtt.__mqttClient ?? mqtt.connect(BROKER_URL, {
       clientId: `nextjs-backend-${Math.random().toString(16).slice(2, 8)}`,
       clean: true,
-      reconnectPeriod: 5000,
+      // Broker public hay reset TCP — reconnect nhanh để thu hẹp cửa sổ
+      // mất message (QoS 1 + clean session không giữ message cho subscriber
+      // đang ngắt kết nối).
+      reconnectPeriod: 2000,
       connectTimeout: 10000,
     });
     globalForMqtt.__mqttClient = client;

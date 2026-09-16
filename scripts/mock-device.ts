@@ -18,7 +18,10 @@
  */
 
 import dotenv from "dotenv";
+// Load .env.local trước (nếu có), .env làm fallback — dotenv không ghi đè
+// biến đã tồn tại nên thứ tự này luôn ưu tiên .env.local.
 dotenv.config({ path: ".env.local" });
+dotenv.config({ path: ".env" });
 import mqtt from "mqtt";
 
 // ============================================================
@@ -88,7 +91,10 @@ function connectMQTT(): void {
   client = mqtt.connect(BROKER_URL, {
     clientId: `mock-${DEVICE_ID}-${Date.now().toString(36)}`,
     clean: true,
-    reconnectPeriod: 0, // không tự reconnect, ta tự xử lý
+    // Tự reconnect khi broker ngắt kết nối ngoài ý muốn (broker public
+    // broker.emqx.io hay reset TCP). client.end() chủ động (phím 'd') vẫn
+    // không bị auto-reconnect cản trở vì end() set cờ disconnecting.
+    reconnectPeriod: 5000,
     connectTimeout: 5000,
   });
 
@@ -132,9 +138,13 @@ function connectMQTT(): void {
     console.log("[MockDevice] ⚠️  MQTT offline");
   });
 
+  client.on("reconnect", () => {
+    console.log("[MockDevice] 🔄 Đang tự kết nối lại MQTT broker...");
+  });
+
   client.on("close", () => {
     if (!isOffline) {
-      console.log("[MockDevice] ⚠️  MQTT connection closed");
+      console.log("[MockDevice] ⚠️  MQTT connection closed (sẽ tự kết nối lại)");
     }
   });
 }
@@ -144,6 +154,27 @@ function connectMQTT(): void {
 // ============================================================
 function handleCommand(payload: { command_id: string; command: string }): void {
   console.log(`\n[MockDevice] 📩 Nhận lệnh: ${payload.command} (ID: ${payload.command_id})`);
+
+  // Bước 1 (ACK flow): báo "đã nhận lệnh" ngay, trước khi bắt đầu chạy.
+  // Server sẽ chuyển lệnh PENDING → ACKNOWLEDGED.
+  const ackPayload = {
+    device_id: DEVICE_ID,
+    command_id: payload.command_id,
+    status: "ACK",
+    timestamp: now(),
+    error: null,
+  };
+  if (!client || !client.connected) {
+    console.error("[MockDevice] ❌ Không thể gửi ACK, MQTT chưa kết nối");
+    return;
+  }
+  client.publish(TOPIC_STATUS, JSON.stringify(ackPayload), { qos: 1 }, (err) => {
+    if (err) {
+      console.error("[MockDevice] ❌ Gửi ACK thất bại:", err.message);
+    } else {
+      console.log(`[MockDevice] 📨 Đã gửi ACK cho ${payload.command_id}`);
+    }
+  });
 
   // Giả lập 1 giây delay (bật/tắt LED thật)
   setTimeout(() => {
@@ -268,6 +299,14 @@ function publishStatus(
   client.publish(TOPIC_STATUS, JSON.stringify(payload), { qos: 1 }, (err) => {
     if (err) {
       console.error("[MockDevice] ❌ Publish status thất bại:", err.message);
+      // Broker public hay reset TCP giữa chừng — thử gửi lại sau khi
+      // client tự kết nối lại, tránh backend chờ hoài rồi đánh TIMEOUT.
+      setTimeout(() => {
+        if (client && client.connected) {
+          console.log("[MockDevice] 🔁 Gửi lại status sau lỗi...");
+          client.publish(TOPIC_STATUS, JSON.stringify(payload), { qos: 1 });
+        }
+      }, 3000);
     } else {
       console.log(`[MockDevice] ✅ Đã gửi status: ${status} → ${state}`);
     }

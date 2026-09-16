@@ -7,7 +7,7 @@ import {
   dbEvents,
 } from "./db-service";
 import { broadcastEvent } from "./sse-manager";
-import type { MQTTStatusPayload } from "@/types/device";
+import type { CommandStatus, MQTTStatusPayload } from "@/types/device";
 
 let initialized = false;
 
@@ -62,7 +62,9 @@ export function initializeMQTTHandlers(): void {
     onStatus: (deviceId: string, payload: MQTTStatusPayload) => {
       // Guard: the public broker carries foreign devices sending empty or
       // malformed payloads — never let them pollute the database.
-      if (!payload || !payload.command_id || !payload.state) {
+      // ACK chỉ cần command_id; SUCCESS/FAILED bắt buộc có state.
+      const isAck = payload?.status === "ACK";
+      if (!payload || !payload.command_id || (!isAck && !payload.state)) {
         console.warn(
           `[Handler] Ignoring malformed status from ${deviceId}:`,
           JSON.stringify(payload)
@@ -73,11 +75,16 @@ export function initializeMQTTHandlers(): void {
       // Defensive: honor device_id inside the payload, fallback to topic
       const targetDeviceId = payload.device_id || deviceId;
 
+      // Map MQTT status → CommandStatus: ACK → ACKNOWLEDGED
+      // (so sánh trực tiếp để TS thu hẹp kiểu PayloadStatus)
+      const dbStatus: CommandStatus =
+        payload.status === "ACK" ? "ACKNOWLEDGED" : payload.status;
+
       updateCommandStatus(
         payload.command_id,
-        payload.status,
-        payload.state,
-        payload.error
+        dbStatus,
+        payload.state ?? null,
+        payload.error ?? null
       )
         .then((command) => {
           if (!command) {
@@ -99,13 +106,16 @@ export function initializeMQTTHandlers(): void {
 
       // currentState is already synced inside updateCommandStatus,
       // but keep lastCommand fresh for the device info panel
-      updateDeviceLastCommand(targetDeviceId, payload.state)
-        .catch((err) => {
-          console.error(
-            `[Handler] Failed to update lastCommand for ${targetDeviceId}:`,
-            err
-          );
-        });
+      // (ACK không có state — bỏ qua để không ghi đè lastCommand cũ)
+      if (payload.state) {
+        updateDeviceLastCommand(targetDeviceId, payload.state)
+          .catch((err) => {
+            console.error(
+              `[Handler] Failed to update lastCommand for ${targetDeviceId}:`,
+              err
+            );
+          });
+      }
     },
   });
 
