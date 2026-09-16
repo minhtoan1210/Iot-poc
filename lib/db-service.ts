@@ -9,6 +9,7 @@ import type {
   ScheduleDoc,
   DeviceState,
   CommandStatus,
+  DeviceSchedule,
 } from "@/types/device";
 import {
   devicesCollection,
@@ -58,6 +59,11 @@ function mapDevice(doc: DeviceDoc): Device {
     currentState: doc.currentState,
     lastSeen: doc.lastSeen ? doc.lastSeen.toISOString() : null,
     lastCommand: doc.lastCommand,
+    firmware: doc.firmware ?? null,
+    deviceSchedules: doc.deviceSchedules ?? null,
+    schedulesSyncedAt: doc.schedulesSyncedAt
+      ? doc.schedulesSyncedAt.toISOString()
+      : null,
   };
 }
 
@@ -131,33 +137,121 @@ export async function ensureDevice(
 }
 
 /**
- * Called on every MQTT heartbeat from `devices/+/heartbeat`.
- * Updates lastSeen and marks the device ONLINE.
+ * A heartbeat arrived. Besides keeping the device ONLINE, the heartbeat now
+ * carries the output state the device actually read back from its pin, so the
+ * server re-syncs even after a power cut or a lost status message — without it
+ * a wrong currentState would stay wrong forever.
+ *
+ * Returns `cameOnline` so the caller can push the schedules down again: while
+ * the device was away, schedule messages published to it were dropped by the
+ * broker (QoS 1 + clean session).
  */
-export async function updateHeartbeat(deviceId: string): Promise<Device> {
+export async function updateHeartbeat(
+  deviceId: string,
+  info: { state?: DeviceState; firmware?: string } = {}
+): Promise<{ device: Device; cameOnline: boolean; stateCorrected: boolean }> {
   await ensureIndexes();
   const now = new Date();
+
+  const before = await (await devicesCollection()).findOne({ deviceId });
+
+  const set: Record<string, unknown> = {
+    lastSeen: now,
+    status: "ONLINE",
+    updatedAt: now,
+  };
+  if (info.state) set.currentState = info.state;
+  if (info.firmware) set.firmware = info.firmware;
+
+  const insert: Record<string, unknown> = {
+    deviceId,
+    name: deviceId,
+    lastCommand: null,
+    createdAt: now,
+  };
+  // NOTE: a field must not appear in both $set and $setOnInsert — MongoDB
+  // rejects that with "Updating the path 'x' would create a conflict".
+  if (!info.state) insert.currentState = "OFF";
 
   const doc = await (
     await devicesCollection()
   ).findOneAndUpdate(
     { deviceId },
+    { $set: set, $setOnInsert: insert },
+    { upsert: true, returnDocument: "after" }
+  );
+
+  const device = mapDevice(doc as DeviceDoc);
+  emitDeviceUpdated(device);
+
+  return {
+    device,
+    cameOnline: !before || before.status !== "ONLINE",
+    stateCorrected: Boolean(
+      before && info.state && before.currentState !== info.state
+    ),
+  };
+}
+
+/**
+ * The broker delivered the device's Last Will: the TCP connection dropped.
+ * Faster and more certain than waiting 45s for missed heartbeats.
+ */
+export async function markDeviceOffline(
+  deviceId: string
+): Promise<Device | null> {
+  const doc = await (
+    await devicesCollection()
+  ).findOneAndUpdate(
+    { deviceId, status: "ONLINE" },
+    { $set: { status: "OFFLINE", updatedAt: new Date() } },
+    { returnDocument: "after" }
+  );
+  if (!doc) return null;
+
+  const device = mapDevice(doc);
+  emitDeviceUpdated(device);
+  return device;
+}
+
+/**
+ * Record the schedule table the device says it is holding in NVS. Lets the UI
+ * show what the hardware really has instead of assuming every schedule message
+ * arrived.
+ */
+export async function saveDeviceSchedules(
+  deviceId: string,
+  schedules: DeviceSchedule[]
+): Promise<Device | null> {
+  const now = new Date();
+  const doc = await (
+    await devicesCollection()
+  ).findOneAndUpdate(
+    { deviceId },
     {
-      $set: { lastSeen: now, status: "ONLINE", updatedAt: now },
-      // NOTE: must not repeat fields from $set — MongoDB rejects
-      // "Updating the path 'status' would create a conflict" otherwise.
+      $set: {
+        deviceSchedules: schedules,
+        schedulesSyncedAt: now,
+        updatedAt: now,
+      },
+      // Upsert: MQTT does not order messages across topics, so this report can
+      // land before the device's first heartbeat has created the document.
+      // Without it the report would be dropped and the UI would show nothing.
       $setOnInsert: {
         deviceId,
         name: deviceId,
+        status: "OFFLINE",
         currentState: "OFF",
+        lastSeen: null,
         lastCommand: null,
         createdAt: now,
       },
     },
     { upsert: true, returnDocument: "after" }
   );
+  if (!doc) return null;
 
-  const device = mapDevice(doc as DeviceDoc);
+  const device = mapDevice(doc);
   emitDeviceUpdated(device);
   return device;
 }
@@ -252,17 +346,34 @@ export async function getCommand(commandId: string): Promise<Command | null> {
  */
 export async function updateCommandStatus(
   commandId: string,
-  status: CommandStatus,
+  reported: "ACK" | "SUCCESS" | "FAILED",
   state: DeviceState | null = null,
   error: string | null = null
 ): Promise<Command | null> {
   const now = new Date();
+  const isAck = reported === "ACK";
+  const status: CommandStatus = isAck ? "ACKNOWLEDGED" : reported;
+
+  // Only move a command forward. An ACK that arrives after the result (MQTT
+  // gives no ordering guarantee across messages) must not drag SUCCESS back to
+  // ACKNOWLEDGED, and a result must not overwrite a TIMEOUT that already fired.
+  const allowedNow: CommandStatus[] = isAck
+    ? ["PENDING"]
+    : ["PENDING", "ACKNOWLEDGED"];
+
+  // On ACK the device has not switched anything yet: its "state" is still the
+  // old one, so do not record it as the command's result.
+  const set: Record<string, unknown> = { status, updatedAt: now };
+  if (!isAck) {
+    set.state = state;
+    set.error = error;
+  }
 
   const doc = await (
     await commandsCollection()
   ).findOneAndUpdate(
-    { commandId },
-    { $set: { status, state, error, updatedAt: now } },
+    { commandId, status: { $in: allowedNow } },
+    { $set: set },
     { returnDocument: "after" }
   );
 
@@ -272,7 +383,7 @@ export async function updateCommandStatus(
   emitCommandUpdated(command);
 
   // Keep device state in sync with the actual reported state
-  if (state) {
+  if (!isAck && state) {
     await updateDeviceState(command.deviceId, state);
   }
   return command;
@@ -296,9 +407,13 @@ export async function getCommandsByDevice(
 // ============================================================
 // TIMEOUT SWEEPER
 // ============================================================
-// Commands stuck in PENDING longer than this are marked TIMEOUT.
+// Commands stuck in PENDING longer than this are marked TIMEOUT: the device
+// never even acknowledged, so it is probably not listening.
 // Must match the UI's COMMAND_TIMEOUT_MS.
 export const COMMAND_TIMEOUT_MS = 10_000;
+// A command the device DID acknowledge gets longer: it confirmed receipt, so
+// the failure mode is a slow or stuck execution, not a lost message.
+export const COMMAND_EXEC_TIMEOUT_MS = 30_000;
 // Devices whose lastSeen is older than this are marked OFFLINE
 // (3 missed 15s heartbeats).
 export const DEVICE_OFFLINE_MS = 45_000;
@@ -316,20 +431,29 @@ export async function sweepStaleData(): Promise<{
 }> {
   const now = Date.now();
 
-  // 1) Expire stale PENDING commands
+  // 1) Expire commands the device never finished — two different deadlines
+  //    depending on whether it acknowledged receipt.
   const staleCommands = await (
     await commandsCollection()
   )
     .find({
-      status: "PENDING",
-      createdAt: { $lt: new Date(now - COMMAND_TIMEOUT_MS) },
+      $or: [
+        {
+          status: "PENDING",
+          createdAt: { $lt: new Date(now - COMMAND_TIMEOUT_MS) },
+        },
+        {
+          status: "ACKNOWLEDGED",
+          updatedAt: { $lt: new Date(now - COMMAND_EXEC_TIMEOUT_MS) },
+        },
+      ],
     })
     .toArray();
 
   const timedOutCommands: Command[] = [];
   for (const doc of staleCommands) {
     const updated = await (await commandsCollection()).findOneAndUpdate(
-      { commandId: doc.commandId, status: "PENDING" }, // re-check to avoid race
+      { commandId: doc.commandId, status: doc.status }, // re-check to avoid race
       { $set: { status: "TIMEOUT", updatedAt: new Date() } },
       { returnDocument: "after" }
     );

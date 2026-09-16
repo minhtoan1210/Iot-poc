@@ -60,6 +60,7 @@ export function DeviceCard({
           label="Last Command"
           value={device.lastCommand || "None"}
         />
+        <InfoItem label="Firmware" value={device.firmware || "—"} />
       </div>
 
       {/* Command Status */}

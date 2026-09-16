@@ -5,7 +5,7 @@ import {
   deleteSchedule,
   ensureDevice,
 } from "@/lib/db-service";
-import { publishSchedule } from "@/lib/mqtt";
+import { publishSchedule, publishScheduleDelete } from "@/lib/mqtt";
 import { initializeMQTTHandlers } from "@/lib/mqtt-handler";
 
 // Ensure MQTT handlers are initialized
@@ -67,10 +67,16 @@ export async function POST(
       enabled !== false
     );
 
-    // Publish schedule to device via MQTT (enabled only)
-    if (enabled !== false) {
-      publishSchedule(deviceId, schedule.scheduleId, time, command as "ON" | "OFF");
-    }
+    // Push it to the device. A disabled schedule is sent too, with
+    // enabled:false — the device needs to know it exists but must not fire it,
+    // otherwise re-enabling later would be the only thing that ever reaches it.
+    publishSchedule(
+      deviceId,
+      schedule.scheduleId,
+      time,
+      command as "ON" | "OFF",
+      enabled !== false
+    );
 
     return NextResponse.json(schedule, { status: 201 });
   } catch (err) {
@@ -86,7 +92,7 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ deviceId: string }> }
 ) {
-  await params;
+  const { deviceId } = await params;
   const { searchParams } = new URL(_request.url);
   const scheduleId = searchParams.get("scheduleId");
 
@@ -105,6 +111,11 @@ export async function DELETE(
         { status: 404 }
       );
     }
+
+    // The device keeps schedules in its own flash — deleting the row here is
+    // not enough, it would go on switching the light at that time forever.
+    publishScheduleDelete(deviceId, scheduleId);
+
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("[API] Failed to delete schedule:", err);
