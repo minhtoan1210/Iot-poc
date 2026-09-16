@@ -25,12 +25,20 @@ import mqtt from "mqtt";
 // CONFIG
 // ============================================================
 const BROKER_URL = process.env.MQTT_BROKER_URL || "mqtt://localhost:1883";
-const DEVICE_ID = "esp32-001";
+// Đổi được để chạy song song với board thật mà không giành nhau trả lời:
+//   MOCK_DEVICE_ID=mock-01 npm run mock-device
+const DEVICE_ID = process.env.MOCK_DEVICE_ID || "esp32-001";
 
 const TOPIC_COMMAND = `devices/${DEVICE_ID}/command`;
 const TOPIC_SCHEDULE = `devices/${DEVICE_ID}/schedule`;
 const TOPIC_STATUS = `devices/${DEVICE_ID}/status`;
 const TOPIC_HEARTBEAT = `devices/${DEVICE_ID}/heartbeat`;
+const TOPIC_SCHEDULES = `devices/${DEVICE_ID}/schedules`;
+const TOPIC_LWT = `devices/${DEVICE_ID}/lwt`;
+
+/** Giả vờ là phiên bản firmware, để UI có gì đó hiển thị. */
+const FW_VERSION = "mock-1.0.0";
+const BOOT_MS = Date.now();
 
 // ============================================================
 // STATE
@@ -44,6 +52,7 @@ interface LocalSchedule {
   schedule_id: string;
   time: string; // "HH:mm"
   command: "ON" | "OFF";
+  enabled: boolean; // server tắt tạm thì vẫn giữ nhưng không kích hoạt
   executedToday: boolean; // đánh dấu đã thực thi hôm nay chưa
 }
 const localSchedules: LocalSchedule[] = [];
@@ -90,6 +99,20 @@ function connectMQTT(): void {
     clean: true,
     reconnectPeriod: 0, // không tự reconnect, ta tự xử lý
     connectTimeout: 5000,
+    // Last Will: broker tự publish khi mất kết nối đột ngột → server đánh
+    // OFFLINE ngay, không phải chờ hết 45s vắng heartbeat.
+    will: {
+      topic: TOPIC_LWT,
+      payload: Buffer.from(
+        JSON.stringify({
+          device_id: DEVICE_ID,
+          online: false,
+          reason: "connection_lost",
+        })
+      ),
+      qos: 1,
+      retain: true,
+    },
   });
 
   client.on("connect", () => {
@@ -101,8 +124,16 @@ function connectMQTT(): void {
     console.log(`[MockDevice] 📡 Subscribed: ${TOPIC_COMMAND}`);
     console.log(`[MockDevice] 📡 Subscribed: ${TOPIC_SCHEDULE}`);
 
-    // Gửi heartbeat lần đầu
+    // Ghi đè LWT retained của lần rớt trước
+    client!.publish(
+      TOPIC_LWT,
+      JSON.stringify({ device_id: DEVICE_ID, online: true }),
+      { qos: 1, retain: true }
+    );
+
+    // Gửi heartbeat lần đầu (kèm trạng thái đèn) + báo bảng lịch đang giữ
     sendHeartbeat();
+    publishSchedules();
 
     // Đồng bộ hàng đợi offline nếu có
     if (offlineQueue.length > 0) {
@@ -145,7 +176,12 @@ function connectMQTT(): void {
 function handleCommand(payload: { command_id: string; command: string }): void {
   console.log(`\n[MockDevice] 📩 Nhận lệnh: ${payload.command} (ID: ${payload.command_id})`);
 
-  // Giả lập 1 giây delay (bật/tắt LED thật)
+  // BƯỚC 1 — ACK ngay: "tôi đã nhận được", đèn CHƯA đổi. Nhờ bước này server
+  // phân biệt được "thiết bị không nghe thấy" với "nghe rồi, đang làm".
+  // state ở đây là trạng thái hiện tại, chưa đổi.
+  if (!isOffline) publishStatus(payload.command_id, currentState, "ACK", null);
+
+  // BƯỚC 2 — giả lập 1 giây delay (bật/tắt LED thật) rồi báo kết quả
   setTimeout(() => {
     if (payload.command === "ON" || payload.command === "OFF") {
       currentState = payload.command as "ON" | "OFF";
@@ -174,16 +210,48 @@ function handleCommand(payload: { command_id: string; command: string }): void {
 // ============================================================
 function handleSchedule(payload: {
   schedule_id: string;
-  time: string;
-  command: string;
+  action?: "set" | "delete";
+  time?: string;
+  command?: string;
+  enabled?: boolean;
+  tz_offset_min?: number;
 }): void {
-  console.log(`\n[MockDevice] 📅 Nhận lịch mới: ${payload.time} → ${payload.command} (ID: ${payload.schedule_id})`);
+  // Xoá: web đã bỏ lịch này. Không xử lý thì "thiết bị" vẫn bật đèn đúng giờ đó.
+  if (payload.action === "delete") {
+    const i = localSchedules.findIndex(
+      (s) => s.schedule_id === payload.schedule_id
+    );
+    if (i < 0) {
+      console.log(`\n[MockDevice] 📅 Xoá ${payload.schedule_id}: không có trong bộ nhớ`);
+      return;
+    }
+    localSchedules.splice(i, 1);
+    console.log(`\n[MockDevice] 🗑️  Đã xoá lịch ${payload.schedule_id}`);
+    logSchedules();
+    publishSchedules();
+    return;
+  }
 
-  // Kiểm tra trùng lặp
+  if (!payload.time || !payload.command) {
+    console.log(`\n[MockDevice] ⚠️  Bỏ lịch ${payload.schedule_id}: thiếu time hoặc command`);
+    return;
+  }
+
+  const enabled = payload.enabled !== false;
+  console.log(
+    `\n[MockDevice] 📅 Nhận lịch: ${payload.time} → ${payload.command}` +
+      `${enabled ? "" : " [tạm tắt]"} (ID: ${payload.schedule_id})`
+  );
+  if (payload.tz_offset_min !== undefined) {
+    console.log(`[MockDevice]    múi giờ server chỉ định: UTC${payload.tz_offset_min >= 0 ? "+" : ""}${payload.tz_offset_min / 60}`);
+  }
+
+  // Khoá là schedule_id: gửi lại cùng id thì sửa tại chỗ, không sinh bản trùng.
   const exists = localSchedules.find((s) => s.schedule_id === payload.schedule_id);
   if (exists) {
     exists.time = payload.time;
     exists.command = payload.command as "ON" | "OFF";
+    exists.enabled = enabled;
     exists.executedToday = false;
     console.log(`[MockDevice] 🔄 Cập nhật lịch cũ: ${payload.schedule_id}`);
   } else {
@@ -191,14 +259,48 @@ function handleSchedule(payload: {
       schedule_id: payload.schedule_id,
       time: payload.time,
       command: payload.command as "ON" | "OFF",
+      enabled,
       executedToday: false,
     });
   }
 
+  logSchedules();
+  publishSchedules();
+}
+
+function logSchedules(): void {
   console.log(`[MockDevice] 📋 Tổng lịch hiện tại: ${localSchedules.length}`);
   localSchedules.forEach((s) => {
     const status = s.executedToday ? "✅ đã chạy" : "⏳ chờ";
-    console.log(`[MockDevice]    ${s.time} → ${s.command} [${status}]`);
+    console.log(
+      `[MockDevice]    ${s.time} → ${s.command} [${status}]${s.enabled ? "" : " (tạm tắt)"}`
+    );
+  });
+}
+
+/**
+ * Báo lên server bảng lịch "thiết bị" đang thực sự giữ. Đây là đường phản hồi
+ * duy nhất cho lịch — không có nó, server gửi lịch xuống rồi không biết có tới
+ * nơi không.
+ */
+function publishSchedules(): void {
+  if (!client || !client.connected) return;
+
+  const payload = {
+    device_id: DEVICE_ID,
+    timestamp: now(),
+    tz_offset_min: 420,
+    schedules: localSchedules.map((s) => ({
+      schedule_id: s.schedule_id,
+      time: s.time,
+      command: s.command,
+      enabled: s.enabled,
+    })),
+  };
+
+  client.publish(TOPIC_SCHEDULES, JSON.stringify(payload), { qos: 1 }, (err) => {
+    if (err) console.error("[MockDevice] ❌ Publish schedules thất bại:", err.message);
+    else console.log(`[MockDevice] 📤 Đã báo bảng lịch: ${localSchedules.length} lịch`);
   });
 }
 
@@ -209,6 +311,7 @@ function checkSchedules(): void {
   const currentTime = nowHHmm();
 
   localSchedules.forEach((schedule) => {
+    if (!schedule.enabled) return;
     if (schedule.time === currentTime && !schedule.executedToday) {
       console.log(`\n[MockDevice] ⏰ ĐÃ ĐẾN GIỜ: ${schedule.time} → ${schedule.command}`);
 
@@ -248,7 +351,7 @@ function checkSchedules(): void {
 function publishStatus(
   commandId: string,
   state: "ON" | "OFF",
-  status: "SUCCESS" | "FAILED",
+  status: "ACK" | "SUCCESS" | "FAILED",
   error: string | null
 ): void {
   if (!client || !client.connected) {
@@ -283,6 +386,11 @@ function sendHeartbeat(): void {
   const payload = {
     device_id: DEVICE_ID,
     timestamp: now(),
+    // Trạng thái đèn đi kèm mỗi nhịp: server tự sửa lại nếu hai bên lệch
+    // (mất điện, hoặc một bản tin status rơi giữa đường).
+    state: currentState,
+    fw: FW_VERSION,
+    uptime_s: Math.floor((Date.now() - BOOT_MS) / 1000),
   };
 
   client.publish(TOPIC_HEARTBEAT, JSON.stringify(payload), { qos: 0 }, (err) => {

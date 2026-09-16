@@ -21,7 +21,18 @@ export function CommandStatusBadge({
           border: "border-amber-200 dark:border-amber-800",
           text: "text-amber-800 dark:text-amber-300",
           icon: "⏳",
-          label: "Đang xử lý...",
+          label: "Đã gửi lệnh, chờ thiết bị xác nhận...",
+        };
+      // The device answered "I got it" but has not switched yet. Splitting this
+      // out is the whole point of the ACK step: a silent device and a busy one
+      // used to look identical from here.
+      case "ACKNOWLEDGED":
+        return {
+          bg: "bg-sky-50 dark:bg-sky-950/30",
+          border: "border-sky-200 dark:border-sky-800",
+          text: "text-sky-800 dark:text-sky-300",
+          icon: "📨",
+          label: "Thiết bị đã nhận lệnh, đang thực hiện...",
         };
       case "SUCCESS":
         return {
@@ -51,6 +62,14 @@ export function CommandStatusBadge({
           text: "text-orange-800 dark:text-orange-300",
           icon: "⚠️",
           label: "Timeout - Không nhận được phản hồi từ thiết bị",
+        };
+      default:
+        return {
+          bg: "bg-zinc-50 dark:bg-zinc-900",
+          border: "border-zinc-200 dark:border-zinc-700",
+          text: "text-zinc-700 dark:text-zinc-300",
+          icon: "•",
+          label: String(status),
         };
     }
   };

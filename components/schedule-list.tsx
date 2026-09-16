@@ -1,18 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import type { Schedule, DeviceState } from "@/types/device";
+import type { Schedule, DeviceState, DeviceSchedule } from "@/types/device";
 
 interface ScheduleListProps {
   schedules: Schedule[];
   onAddSchedule: (time: string, command: DeviceState) => void;
   onDeleteSchedule: (scheduleId: string) => void;
+  /** Bảng lịch thiết bị báo là nó đang thực sự giữ trong NVS. */
+  deviceSchedules?: DeviceSchedule[] | null;
+  schedulesSyncedAt?: string | null;
 }
 
 export function ScheduleList({
   schedules,
   onAddSchedule,
   onDeleteSchedule,
+  deviceSchedules,
+  schedulesSyncedAt,
 }: ScheduleListProps) {
   const [showForm, setShowForm] = useState(false);
   const [time, setTime] = useState("07:00");
@@ -149,6 +154,87 @@ export function ScheduleList({
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      <DeviceScheduleSync
+        serverSchedules={schedules}
+        deviceSchedules={deviceSchedules}
+        syncedAt={schedulesSyncedAt}
+      />
+    </div>
+  );
+}
+
+/**
+ * Lịch nằm ở hai nơi: MongoDB (bảng trên) và flash của thiết bị. Thiết bị tự
+ * báo bảng nó đang giữ qua topic `devices/{id}/schedules`. Khối này đối chiếu
+ * hai bên — không có nó thì không cách nào biết lệnh gửi xuống có tới nơi không.
+ */
+function DeviceScheduleSync({
+  serverSchedules,
+  deviceSchedules,
+  syncedAt,
+}: {
+  serverSchedules: Schedule[];
+  deviceSchedules?: DeviceSchedule[] | null;
+  syncedAt?: string | null;
+}) {
+  if (!deviceSchedules) {
+    return (
+      <p className="mt-4 border-t border-zinc-200 pt-3 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+        Thiết bị chưa báo bảng lịch của nó. Cần firmware biết gửi topic{" "}
+        <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">
+          devices/&#123;id&#125;/schedules
+        </code>
+        .
+      </p>
+    );
+  }
+
+  const onDevice = new Set(deviceSchedules.map((s) => s.scheduleId));
+  const onServer = new Set(serverSchedules.map((s) => s.scheduleId));
+
+  // Lịch đang bật trên web mà thiết bị không có -> đến giờ sẽ không chạy.
+  const missing = serverSchedules.filter(
+    (s) => s.enabled && !onDevice.has(s.scheduleId)
+  );
+  // Lịch còn trong flash mà web đã xoá -> thiết bị vẫn sẽ bật/tắt đèn.
+  const stale = deviceSchedules.filter((s) => !onServer.has(s.scheduleId));
+  const inSync = missing.length === 0 && stale.length === 0;
+
+  const when = syncedAt ? new Date(syncedAt).toLocaleTimeString() : "?";
+
+  return (
+    <div className="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+      <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        Thiết bị đang giữ trong bộ nhớ
+      </p>
+
+      {inSync ? (
+        <p className="mt-1 text-sm text-green-700 dark:text-green-400">
+          ✅ Khớp — {deviceSchedules.length} lịch, thiết bị báo lúc {when}
+        </p>
+      ) : (
+        <div className="mt-1 space-y-1 text-sm">
+          {missing.length > 0 && (
+            <p className="text-amber-700 dark:text-amber-400">
+              ⚠️ {missing.length} lịch chưa tới được thiết bị (
+              {missing.map((s) => `${s.time} ${s.command}`).join(", ")}) — đến
+              giờ sẽ không chạy
+            </p>
+          )}
+          {stale.length > 0 && (
+            <p className="text-amber-700 dark:text-amber-400">
+              ⚠️ {stale.length} lịch còn sót trong bộ nhớ thiết bị (
+              {stale.map((s) => `${s.time} ${s.command}`).join(", ")}) — thiết bị
+              vẫn sẽ bật/tắt theo lịch này
+            </p>
+          )}
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Thiết bị báo lúc {when}. Lệch thường là do thiết bị offline lúc lịch
+            được tạo/xoá — nối mạng lại thì server tự đẩy xuống.
+          </p>
         </div>
       )}
     </div>

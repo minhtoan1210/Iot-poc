@@ -13,7 +13,10 @@ import { DeviceCard } from "@/components/device-card";
 import { ScheduleList } from "@/components/schedule-list";
 
 const DEVICE_ID = "esp32-001";
+// Không nghe thấy gì từ thiết bị -> TIMEOUT. Phải khớp với sweeper của backend.
 const COMMAND_TIMEOUT_MS = 10000;
+// Thiết bị đã ACK: nó có nghe, chỉ là chưa xong -> cho thêm thời gian.
+const COMMAND_EXEC_TIMEOUT_MS = 30000;
 
 export default function DashboardClient() {
   const [device, setDevice] = useState<Device | null>(null);
@@ -92,6 +95,19 @@ export default function DashboardClient() {
                 ? `Error: ${updatedCommand.data.error}`
                 : `Last update: ${new Date(updatedCommand.data.updatedAt).toLocaleTimeString()}`
             );
+
+            // Thiết bị đã xác nhận nhận được lệnh: gia hạn đồng hồ đếm ngược
+            // cho khớp với backend, đừng báo TIMEOUT trong khi nó đang chạy.
+            if (updatedCommand.data.status === "ACKNOWLEDGED") {
+              if (timeoutRef.current) clearTimeout(timeoutRef.current);
+              timeoutRef.current = setTimeout(() => {
+                setCommandStatus("TIMEOUT");
+                setSending(false);
+                setLastResponse(
+                  `Đã nhận lệnh nhưng không báo kết quả - timeout lúc ${new Date().toLocaleTimeString()}`
+                );
+              }, COMMAND_EXEC_TIMEOUT_MS);
+            }
 
             // Clear sending state and timeout when we get a definitive result
             if (
@@ -230,6 +246,8 @@ export default function DashboardClient() {
         schedules={schedules}
         onAddSchedule={handleAddSchedule}
         onDeleteSchedule={handleDeleteSchedule}
+        deviceSchedules={device.deviceSchedules}
+        schedulesSyncedAt={device.schedulesSyncedAt}
       />
     </div>
   );
